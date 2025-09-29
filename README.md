@@ -53,26 +53,24 @@ This experimental release represents our ongoing research into more efficient tr
 - To rigorously evaluate the impact of introducing sparse attention, we deliberately aligned the training configurations of DeepSeek-V3.2-Exp with V3.1-Terminus. Across public benchmarks in various domains, DeepSeek-V3.2-Exp demonstrates performance on par with V3.1-Terminus.
 
 
-| Benchmark | DeepSeek-V3.2 | DeepSeek-V3.1-Terminus |
+| Benchmark | DeepSeek-V3.1-Terminus | DeepSeek-V3.2-Exp |
 | :--- | :---: | :---: |
 | **Reasoning Mode w/o Tool Use** | | |
 | MMLU-Pro | 85.0 | 85.0 |
-| GPQA-Diamond | 79.9 | 80.7 |
-| Humanity's Last Exam | 19.8 | 21.7 |
-| LiveCodeBench | 74.1 | 74.9 |
-| AIME 2025 | 89.3 | 88.4 |
-| HMMT 2025 | 83.6 | 86.1 |
-| Codeforces | 2121 | 2046 |
-| Aider-Polyglot | 74.5 | 76.1 |
+| GPQA-Diamond | 80.7 | 79.9 |
+| Humanity's Last Exam | 21.7 | 19.8 |
+| LiveCodeBench | 74.9 | 74.1 |
+| AIME 2025 | 88.4 | 89.3 |
+| HMMT 2025 | 86.1 | 83.6 |
+| Codeforces | 2046 | 2121 |
+| Aider-Polyglot | 76.1 | 74.5 |
 | **Agentic Tool Use** | | |
-| BrowseComp | 40.1 | 38.5 |
-| BrowseComp-zh | 47.9 | 45.0 |
-| SimpleQA | 97.1 | 96.8 |
-| SWE Verified | 67.8 | 68.4 |
-| SWE-bench Multilingual | 57.9 | 57.8 |
-| Terminal-bench | 37.7 | 36.7 |
-
-
+| BrowseComp | 38.5 | 40.1 |
+| BrowseComp-zh | 45.0 | 47.9 |
+| SimpleQA | 96.8 | 97.1 |
+| SWE Verified | 68.4 | 67.8 |
+| SWE-bench Multilingual | 57.8 | 57.9 |
+| Terminal-bench | 36.7 | 37.7 |
 
 
 
@@ -93,6 +91,13 @@ export CONFIG=config_671B_v3.2.json
 torchrun --nproc-per-node ${MP} generate.py --ckpt-path ${SAVE_PATH} --config ${CONFIG} --interactive
 ```
 
+
+
+## Open-Source Kernels
+
+For TileLang kernels with **better readability and research-purpose design**, please refer to [TileLang](https://github.com/tile-ai/tilelang/tree/main/examples/deepseek-v32).
+
+For **high-performance CUDA kernels**, indexer logit kernels (including paged versions) are available in [DeepGEMM](https://github.com/deepseek-ai/DeepGEMM/pull/200). Sparse attention kernels are released in [FlashMLA](https://github.com/deepseek-ai/FlashMLA/pull/98).
 
 
 
