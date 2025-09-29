@@ -76,6 +76,7 @@ This experimental release represents our ongoing research into more efficient tr
 
 ## How to Run Locally
 
+### HuggingFace
 We provide an updated inference demo code in the [inference](https://huggingface.co/deepseek-ai/DeepSeek-V3.2-Exp/tree/main/inference) folder to help the community quickly get started with our model and understand its architectural details.
 
 First convert huggingface model weights to the the format required by our inference demo. Set `MP` to match your available GPU count:
@@ -91,6 +92,26 @@ export CONFIG=config_671B_v3.2.json
 torchrun --nproc-per-node ${MP} generate.py --ckpt-path ${SAVE_PATH} --config ${CONFIG} --interactive
 ```
 
+### SGLang
+
+#### Installation with Docker
+
+```
+# H200
+docker pull lmsysorg/sglang:dsv32
+
+# MI350
+docker pull lmsysorg/sglang:dsv32-rocm
+
+# NPUs
+docker pull lmsysorg/sglang:dsv32-a2
+docker pull lmsysorg/sglang:dsv32-a3
+```
+
+#### Launch Command
+```bash
+python -m sglang.launch_server --model deepseek-ai/DeepSeek-V3.2-Exp --tp 8 --dp 8 --page-size 64
+```
 
 
 ## Open-Source Kernels
