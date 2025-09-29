@@ -118,7 +118,7 @@ docker pull lmsysorg/sglang:dsv32-a3
 
 #### Launch Command
 ```bash
-python -m sglang.launch_server --model deepseek-ai/DeepSeek-V3.2-Exp --tp 8 --dp 8 --page-size 64
+python -m sglang.launch_server --model deepseek-ai/DeepSeek-V3.2-Exp --tp 8 --dp 8 --enable-dp-attention
 ```
 
 ### vLLM
