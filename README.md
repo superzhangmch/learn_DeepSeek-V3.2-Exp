@@ -74,6 +74,14 @@ This experimental release represents our ongoing research into more efficient tr
 
 
 
+## Open-Source Kernels
+
+For TileLang kernels with **better readability and research-purpose design**, please refer to [TileLang](https://github.com/tile-ai/tilelang/tree/main/examples/deepseek-v32).
+
+For **high-performance CUDA kernels**, indexer logit kernels (including paged versions) are available in [DeepGEMM](https://github.com/deepseek-ai/DeepGEMM/pull/200). Sparse attention kernels are released in [FlashMLA](https://github.com/deepseek-ai/FlashMLA/pull/98).
+
+
+
 ## How to Run Locally
 
 ### HuggingFace
@@ -112,13 +120,6 @@ docker pull lmsysorg/sglang:dsv32-a3
 ```bash
 python -m sglang.launch_server --model deepseek-ai/DeepSeek-V3.2-Exp --tp 8 --dp 8 --page-size 64
 ```
-
-
-## Open-Source Kernels
-
-For TileLang kernels with **better readability and research-purpose design**, please refer to [TileLang](https://github.com/tile-ai/tilelang/tree/main/examples/deepseek-v32).
-
-For **high-performance CUDA kernels**, indexer logit kernels (including paged versions) are available in [DeepGEMM](https://github.com/deepseek-ai/DeepGEMM/pull/200). Sparse attention kernels are released in [FlashMLA](https://github.com/deepseek-ai/FlashMLA/pull/98).
 
 
 
