@@ -465,8 +465,13 @@ class Indexer(torch.nn.Module):
         k_pe = apply_rotary_emb(k_pe.unsqueeze(2), freqs_cis).squeeze(2)
         k = torch.cat([k_pe, k_nope], dim=-1)
         
-        q = rotate_activation(q)
-        k = rotate_activation(k)
+        q = rotate_activation(q) # 内部其实就是做了一个 hadamard 变换。 hadamard变换是正交的，而正交矩阵其实就是旋转，所以叫 rotate_activation
+        k = rotate_activation(k) 
+        # 为什么上面 q 与 k 要做 hadamard 变换。
+        #   (1) 首先，它不影响结果正确性： (qH)(kH)' = qHH'k'=qk', HH'=I 因为 H 正交。
+        #   (2) 接下来要对 q、k 作量化，而 q、k 中的 outliers 值会导致量化的效果下降，于是希望降低 outliers。而 hadamard 变换正好可以使得输入维度上的相关性被打散，使得分量更接近独立、均匀。
+        #       所以，这是为了fp8 量化而做的准备。
+        
         q_fp8, q_scale = act_quant(q, block_size, self.scale_fmt)      # q，k 要 fp8 量化
         k_fp8, k_scale = act_quant(k, block_size, self.scale_fmt)
         self.k_cache[:bsz, start_pos:end_pos] = k_fp8
