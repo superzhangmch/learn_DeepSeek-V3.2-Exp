@@ -438,8 +438,8 @@ class Indexer(torch.nn.Module):
         self.rope_head_dim: int = args.qk_rope_head_dim
         self.index_topk: int = args.index_topk
         self.q_lora_rank: int = args.q_lora_rank
-        self.wq_b = Linear(self.q_lora_rank, self.n_heads * self.head_dim)
-        self.wk = Linear(self.dim, self.head_dim)
+        self.wq_b = Linear(self.q_lora_rank, self.n_heads * self.head_dim)       # output.shape = [index_n_heads, index_head_dim]
+        self.wk = Linear(self.dim, self.head_dim)                                # output.shape = [index_head_dim]
         self.k_norm = LayerNorm(self.head_dim)
         self.weights_proj = Linear(self.dim, self.n_heads, dtype=torch.get_default_dtype())
         self.softmax_scale = self.head_dim ** -0.5
@@ -452,25 +452,40 @@ class Indexer(torch.nn.Module):
     def forward(self, x: torch.Tensor, qr: torch.Tensor, start_pos: int, freqs_cis: torch.Tensor, mask: Optional[torch.Tensor]):
         bsz, seqlen, _ = x.size()
         end_pos = start_pos + seqlen
-        q = self.wq_b(qr)
+        
+        q = self.wq_b(qr)                                                # qr: latent_lora_q; 这一样把它升维到 index_n_heads * index_head_dim
         q = rearrange(q, 'b s (h d) -> b s h d', d=self.head_dim)
         q_pe, q_nope = torch.split(q, [self.rope_head_dim, self.head_dim - self.rope_head_dim], dim=-1)
         q_pe = apply_rotary_emb(q_pe, freqs_cis)
         q = torch.cat([q_pe, q_nope], dim=-1)
-        k = self.wk(x)
+        
+        k = self.wk(x)                                                   # k.shape = [..., index_head_dim]
         k = self.k_norm(k)
         k_pe, k_nope = torch.split(k, [self.rope_head_dim, self.head_dim - self.rope_head_dim], dim=-1)
         k_pe = apply_rotary_emb(k_pe.unsqueeze(2), freqs_cis).squeeze(2)
         k = torch.cat([k_pe, k_nope], dim=-1)
+        
         q = rotate_activation(q)
         k = rotate_activation(k)
-        q_fp8, q_scale = act_quant(q, block_size, self.scale_fmt)
+        q_fp8, q_scale = act_quant(q, block_size, self.scale_fmt)      # q，k 要 fp8 量化
         k_fp8, k_scale = act_quant(k, block_size, self.scale_fmt)
         self.k_cache[:bsz, start_pos:end_pos] = k_fp8
         self.k_scale_cache[:bsz, start_pos:end_pos] = k_scale
-        weights = self.weights_proj(x) * self.n_heads ** -0.5
+        
+        weights = self.weights_proj(x) * self.n_heads ** -0.5          # weight = (xW) / sqrt(n_heads)
         weights = weights.unsqueeze(-1) * q_scale * self.softmax_scale
-        index_score = fp8_index(q_fp8.contiguous(), weights, self.k_cache[:bsz, :end_pos].contiguous(), self.k_scale_cache[:bsz, :end_pos].contiguous())
+
+        # 按 paper：index_score(s,t) = \sum_h weights_h Relu(q_h k), 其中q_h 是未知 s 的，k 是位置 t 的
+        #  下面的 fp8_index 就是实现了 fp8 下的该操作。看代码其实现的大约是：
+        #       logits = accum_fp32(q_8 * k_8')
+        #       logits <- ReLU(logits) * weight
+        #       logits_sum = \sum_{j=1}^{N_heads} logits_{:, :, :, j}
+        #       index_score = logits_sum * k_s,  k_s 是量化恢复用的
+        index_score = fp8_index(q_fp8.contiguous(), 
+                                weights, 
+                                self.k_cache[:bsz, :end_pos].contiguous(), 
+                                self.k_scale_cache[:bsz, :end_pos].contiguous())
+        
         if mask is not None:
             index_score += mask
         topk_indices = index_score.topk(min(self.index_topk, end_pos), dim=-1)[1]
@@ -549,48 +564,52 @@ class MLA(nn.Module):
         """
         bsz, seqlen, _ = x.size()
         end_pos = start_pos + seqlen
-        qr = self.q_norm(self.wq_a(x))
-        q = self.wq_b(qr)
+        
+        qr = self.q_norm(self.wq_a(x)) # 压缩后的 q
+        q = self.wq_b(qr)              # 解压还原后的 q
         q = q.view(bsz, seqlen, self.n_local_heads, self.qk_head_dim)
         q_nope, q_pe = torch.split(q, [self.qk_nope_head_dim, self.qk_rope_head_dim], dim=-1)
         q_pe = apply_rotary_emb(q_pe, freqs_cis)
-        kv = self.wkv_a(x)
+        
+        kv = self.wkv_a(x)             # 得到压缩后的 kv
         kv, k_pe = torch.split(kv, [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
         kv = self.kv_norm(kv)
         k_pe = apply_rotary_emb(k_pe.unsqueeze(2), freqs_cis)
         self.kv_cache[:bsz, start_pos:end_pos] = kv
         self.pe_cache[:bsz, start_pos:end_pos] = k_pe.squeeze(2)
+        
         if mask is not None:    # MHA prefill
             q = torch.cat([q_nope, q_pe], dim=-1)
-            kv = self.wkv_b(kv)
+            kv = self.wkv_b(kv)  # 解压还原后的 kv
             kv = kv.view(bsz, seqlen, self.n_local_heads, self.qk_nope_head_dim + self.v_head_dim)
             k_nope, v = torch.split(kv, [self.qk_nope_head_dim, self.v_head_dim], dim=-1)
             k = torch.cat([k_nope, k_pe.expand(-1, -1, self.n_local_heads, -1)], dim=-1)
-            scores = torch.einsum("bshd,bthd->bsht", q.float(), k.float()) * self.softmax_scale
+            scores = torch.einsum("bshd,bthd->bsht", q.float(), k.float()) * self.softmax_scale # QK': MHA mode 的
 
             # indexer
             topk_indices = self.indexer(x, qr, start_pos, freqs_cis, mask)
-            index_mask = torch.full((bsz, seqlen, seqlen), float("-inf"), device=x.device).scatter_(-1, topk_indices, 0)
-            index_mask += mask
-            scores += index_mask.unsqueeze(2)
+            index_mask = torch.full((bsz, seqlen, seqlen), float("-inf"), device=x.device).scatter_(-1, topk_indices, 0) # topk_indices位置为0其余是 -inf
+            index_mask += mask                                                                                           # mask：0 和 -inf 组成。所以这一句相当于是两个 mask 求交集
+            scores += index_mask.unsqueeze(2)                                                                            # exp(-inf) = 0, 所以把 mask 加进 score
 
-            scores = scores.softmax(dim=-1, dtype=torch.float32)
+            scores = scores.softmax(dim=-1, dtype=torch.float32)                                                         # 按说这里需要作稀疏计算，这里通过施加 mask的方式，只是模拟了稀疏计算。真正线上并不能用这句，它不提速
             x = torch.einsum("bsht,bthd->bshd", scores.type_as(x), v)
-        else:                   # MHA decode
+        else:                   # MQA decode
             if self.dequant_wkv_b is None and self.wkv_b.scale is not None:
                 self.dequant_wkv_b = weight_dequant(self.wkv_b.weight, self.wkv_b.scale)
             wkv_b = self.wkv_b.weight if self.dequant_wkv_b is None else self.dequant_wkv_b
             wkv_b = wkv_b.view(self.n_local_heads, -1, self.kv_lora_rank)
-            q_nope = torch.einsum("bshd,hdc->bshc", q_nope, wkv_b[:, :self.qk_nope_head_dim])
+            q_nope = torch.einsum("bshd,hdc->bshc", q_nope, wkv_b[:, :self.qk_nope_head_dim])  # q_nope == latent_q * q_up_proj * k_up_proj
             scores = (torch.einsum("bshc,btc->bsht", q_nope.float(), self.kv_cache[:bsz, :end_pos].float()) +
-                      torch.einsum("bshr,btr->bsht", q_pe.float(), self.pe_cache[:bsz, :end_pos].float())) * self.softmax_scale
+                      torch.einsum("bshr,btr->bsht", q_pe.float(), self.pe_cache[:bsz, :end_pos].float())
+                     ) * self.softmax_scale
 
-            # indexer
+            # indexer: 下面三句和 MHA mode 的一样
             topk_indices = self.indexer(x, qr, start_pos, freqs_cis, mask)
             index_mask = torch.full((bsz, 1, end_pos), float("-inf"), device=x.device).scatter_(-1, topk_indices, 0)
             scores += index_mask.unsqueeze(2)
 
-            scores = scores.softmax(dim=-1, dtype=torch.float32)
+            scores = scores.softmax(dim=-1, dtype=torch.float32) # 仍然是只是模拟稀疏操作，非物理上真稀疏操作
             x = torch.einsum("bsht,btc->bshc", scores.type_as(x), self.kv_cache[:bsz, :end_pos])
             x = torch.einsum("bshc,hdc->bshd", x, wkv_b[:, -self.v_head_dim:])
         x = self.wo(x.flatten(2))
