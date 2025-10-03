@@ -425,6 +425,8 @@ def rotate_activation(x: torch.Tensor) -> torch.Tensor:
     assert x.dtype == torch.bfloat16
     from fast_hadamard_transform import hadamard_transform
     hidden_size = x.size(-1)
+
+    # 为什么要有 scale=1/sqrt(hidden_size): hadamard变换，并不是真的正交，而是 HH' = H'H = n*I, H.shape = [n,n], 所以要除以 1/sqrt(n)
     return hadamard_transform(x, scale=hidden_size ** -0.5)
 
 
