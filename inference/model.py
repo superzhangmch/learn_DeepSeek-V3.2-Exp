@@ -453,13 +453,13 @@ class Indexer(torch.nn.Module):
         bsz, seqlen, _ = x.size()
         end_pos = start_pos + seqlen
         
-        q = self.wq_b(qr)                                                # qr: latent_lora_q; 这一样把它升维到 index_n_heads * index_head_dim
+        q = self.wq_b(qr)                                                # qr: latent_lora_q; 这一样把它升维到 index_n_heads * index_head_dim，也就是 Index 内把 q 转成了多个 heads
         q = rearrange(q, 'b s (h d) -> b s h d', d=self.head_dim)
         q_pe, q_nope = torch.split(q, [self.rope_head_dim, self.head_dim - self.rope_head_dim], dim=-1)
         q_pe = apply_rotary_emb(q_pe, freqs_cis)
         q = torch.cat([q_pe, q_nope], dim=-1)
         
-        k = self.wk(x)                                                   # k.shape = [..., index_head_dim]
+        k = self.wk(x)                                                   # k.shape = [..., index_head_dim]，Index 内把 k 转成了1 个 head
         k = self.k_norm(k)
         k_pe, k_nope = torch.split(k, [self.rope_head_dim, self.head_dim - self.rope_head_dim], dim=-1)
         k_pe = apply_rotary_emb(k_pe.unsqueeze(2), freqs_cis).squeeze(2)
@@ -480,7 +480,7 @@ class Indexer(torch.nn.Module):
         weights = self.weights_proj(x) * self.n_heads ** -0.5          # weight = (xW) / sqrt(n_heads)
         weights = weights.unsqueeze(-1) * q_scale * self.softmax_scale
 
-        # 按 paper：index_score(s,t) = \sum_h weights_h Relu(q_h k), 其中q_h 是未知 s 的，k 是位置 t 的
+        # 按 paper：index_score(s,t) = \sum_h weights_h Relu(q_h k), 其中q_h 是未知 s 的，k 是位置 t 的。q是多heads的，k 是单head的
         #  下面的 fp8_index 就是实现了 fp8 下的该操作。看代码其实现的大约是：
         #       logits = accum_fp32(q_8 * k_8')
         #       logits <- ReLU(logits) * weight
