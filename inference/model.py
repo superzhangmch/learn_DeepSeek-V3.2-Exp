@@ -447,7 +447,7 @@ class Indexer(torch.nn.Module):
         self.softmax_scale = self.head_dim ** -0.5
         self.scale_fmt = args.scale_fmt
 
-        # 这是是类似 kv-cache 一样的 indexer-k-cache，需要把历史都存下来。存的是 fp8 的，也就是一个token 只占 1字节
+        # 这是是类似 kv-cache 一样的 indexer-k-cache，需要把历史都存下来。存的是 fp8 的，k 一个head，head_dim=128, 这样一个token 占 128字节的cache；再加上1字节的 scale，共129字节。
         self.register_buffer("k_cache", torch.zeros(args.max_batch_size, args.max_seq_len, self.head_dim, dtype=torch.float8_e4m3fn), persistent=False)
         self.register_buffer("k_scale_cache", torch.zeros(args.max_batch_size, args.max_seq_len, self.head_dim // block_size, dtype=torch.float32), persistent=False) # block_size=128
 
@@ -553,6 +553,7 @@ class MLA(nn.Module):
 
         self.indexer = Indexer(args)
 
+        # MLA 显存占用，每个元素是 fp32 四字节，kv_lora_rank+qk_rope_head_dim=512+64, 一个 token的显存占用是（512+64）*4；而一个token在indexer 上只占用 129个字节。可见新增的显存占用不多
         self.register_buffer("kv_cache", torch.zeros(args.max_batch_size, args.max_seq_len, self.kv_lora_rank), persistent=False)
         self.register_buffer("pe_cache", torch.zeros(args.max_batch_size, args.max_seq_len, self.qk_rope_head_dim), persistent=False)
         self.dequant_wkv_b = None
